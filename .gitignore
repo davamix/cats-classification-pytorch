@@ -1,1 +1,6 @@
 data/
+experiments/
+
+# model files
+*.pth
+*.pth.tar

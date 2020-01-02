@@ -4,12 +4,13 @@ import torchvision
 from torchvision import datasets, models, transforms
 import torch.optim as optim
 from torch.optim import lr_scheduler
-import matplotlib.pyplot as plt
 
 import os
 import time
 import datetime
 import copy
+
+from utils import save_experiment, save_metrics
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
@@ -50,49 +51,6 @@ print(f"Samples in Validation: {len(val_dataset)}")
 print(f"Total samples: {len(train_dataset) + len(val_dataset)}")
 print(f"Number of classes: {len(train_dataset.classes)}")
 print(f"Classes: {train_dataset.classes}")
-
-
-'''
-Create a file with the values of the hyperparameters
-name: name of the experiment (datetime)
-hyperparameters: dictionary. {"lr":"0.0.1", ...}
-'''
-def save_experiment(exp_path, hyperparameters):
-    if not os.path.exists(exp_path):
-        os.makedirs(ex_path)
-
-    params_path = os.path.join(ex_path, "parameters.txt")
-    f = open(params_path, "w")
-    
-    for hp in hyperparameters:
-        f.write(f"{hp}: {hyperparameters[hp]}\n")
-    
-    f.close()
-
-# Save metrics
-def save_metrics(exp_path, t_losses, v_losses, t_accs, v_accs):
-    if not os.path.exists(exp_path):
-        os.makedirs(ex_path)
-
-    fig = plt.figure(figsize=(15,5))
-    plt.subplot(1,2,1)
-    plt.plot(t_losses, color = 'blue', label = 'Train')
-    plt.plot(v_losses, color = 'red', label = 'Validation')
-    plt.title('Loss')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-
-    plt.subplot(1,2,2)
-    plt.plot(t_accs, color = 'blue', label = 'Train')
-    plt.plot(v_accs, color = 'red', label = 'Validation')
-    plt.title('Accuracy')
-    plt.xlabel('epoch')
-    plt.ylabel('accuracy')
-    plt.legend()
-
-    metrics_path = os.path.join(exp_path, "metrics.png")
-    fig.savefig(metrics_path)
 
 
 
@@ -167,8 +125,23 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=10):
 
     return model, train_losses, train_accuracies, val_losses, val_accuracies
 
+## Start training and save the results of the experiment
+def run_experiment(model, hyperparameters):
+    # Train the model
+    print("\nStart training process...\n")
+    model, t_losses, t_accs, v_losses, v_accs = train_model(model, criterion, optimizer, scheduler, hyperparameters['epochs'])
+    print("\nTrainig process finished\n")
 
-# Hyperparameters
+    # Save experiment
+    experiment_name = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    ex_path = os.path.join(experiments_path, experiment_name)
+    print(f"Saving experiment results in {ex_path}...", end='')
+    save_experiment(ex_path, hyperparameters)
+    save_metrics(ex_path, t_losses, v_losses, t_accs, v_accs)
+    print("OK")
+    
+
+# Hyperparameters configuration
 hyperparameters = {
     'epochs': 5,
     'opt_lr': 0.05,
@@ -192,11 +165,5 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model_res.fc.parameters(), lr = hyperparameters['opt_lr'], momentum = hyperparameters['opt_momentum'])
 scheduler = lr_scheduler.StepLR(optimizer, step_size = hyperparameters['sch_step'], gamma = hyperparameters['sch_gamma'])
 
-# Train the model
-model_res, t_losses, t_accs, v_losses, v_accs = train_model(model_res, criterion, optimizer, scheduler, hyperparameters['epochs'])
-
-# Save experiment
-experiment_name = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-ex_path = os.path.join(experiments_path, experiment_name)
-save_experiment(ex_path, hyperparameters)
-save_metrics(ex_path, t_losses, v_losses, t_accs, v_accs)
+# Start experiment
+run_experiment(model_res, hyperparameters)

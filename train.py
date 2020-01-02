@@ -4,13 +4,14 @@ import torchvision
 from torchvision import datasets, models, transforms
 import torch.optim as optim
 from torch.optim import lr_scheduler
+import numpy as np
 
 import os
 import time
 import datetime
 import copy
 
-from utils import save_experiment, save_metrics
+from utils import save_hyperparameters, save_metrics, save_predictions, fix_colormap
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
@@ -23,12 +24,16 @@ model_path = 'cat-model.pth.tar'
 experiments_path = "experiments" # Path to save the current values of hyperparameters and metrics for each experiment
 
 # Configure datasets
+mean_norm = [0.485, 0.456, 0.406]
+std_norm = [0.229, 0.224, 0.225]
+
 transform = transforms.Compose([
+    transforms.Resize(720),
     transforms.RandomResizedCrop(size=224),
     transforms.RandomRotation(degrees=15),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    transforms.Normalize(mean_norm, std_norm)
 ])
 
 train_dataset = datasets.ImageFolder(train_path, transform = transform)
@@ -125,25 +130,66 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=10):
 
     return model, train_losses, train_accuracies, val_losses, val_accuracies
 
+# Make some predictions over the validation dataset
+def validate_model(model, num_samples=1):
+    predictions = []
+    model.eval()
+    
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(dataloaders['val']):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            outputs = model(inputs)
+
+            # Get probabilities
+            sm = nn.Softmax(dim=1)
+            probs = sm(outputs)
+
+            _, preds = torch.max(outputs, 1)
+
+            for x in range(num_samples):
+                sample_prob = probs[x].cpu().detach().numpy()[preds[x]] * 100
+                #print(f"Predicted:{train_dataset.classes[preds[x]]} ({sample_prob:.2f}%)\nExpected: {train_dataset.classes[labels[x]]}")
+
+                fixed_image = fix_colormap(inputs.cpu().data[x], mean_norm, std_norm)
+                
+                # (image, class_predicted, probability, class_expected)
+                prediction = (fixed_image, train_dataset.classes[preds[x]], sample_prob, train_dataset.classes[labels[x]])
+                predictions.append(prediction)
+
+                # Exit the loop when we have the predictions required
+                if len(predictions) == num_samples: break
+
+            if len(predictions) == num_samples: break
+    
+    return predictions
+
 ## Start training and save the results of the experiment
 def run_experiment(model, hyperparameters):
     # Train the model
     print("\nStart training process...\n")
     model, t_losses, t_accs, v_losses, v_accs = train_model(model, criterion, optimizer, scheduler, hyperparameters['epochs'])
-    print("\nTrainig process finished\n")
+    print("\nTraining process finished\n")
+
+    # Validate model
+    print("\nValidating model...", end='')
+    predictions = validate_model(model, num_samples=6)
+    print("OK")
 
     # Save experiment
     experiment_name = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
     ex_path = os.path.join(experiments_path, experiment_name)
     print(f"Saving experiment results in {ex_path}...", end='')
-    save_experiment(ex_path, hyperparameters)
+    save_hyperparameters(ex_path, hyperparameters)
     save_metrics(ex_path, t_losses, v_losses, t_accs, v_accs)
+    save_predictions(ex_path, predictions)
     print("OK")
     
 
 # Hyperparameters configuration
 hyperparameters = {
-    'epochs': 5,
+    'epochs': 1,
     'opt_lr': 0.05,
     'opt_momentum': 0.9,
     'sch_gamma': 0.15,
@@ -167,3 +213,5 @@ scheduler = lr_scheduler.StepLR(optimizer, step_size = hyperparameters['sch_step
 
 # Start experiment
 run_experiment(model_res, hyperparameters)
+
+
